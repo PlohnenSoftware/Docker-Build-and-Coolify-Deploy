@@ -463,13 +463,13 @@ a Coolify instance.
 Releasing is a tag push:
 
 ```console
-$ git tag -a v2.0.1 -m v2.0.1 && git push origin v2.0.1
+$ git tag -a v2.1.0 -m v2.1.0 && git push origin v2.1.0
 ```
 
-`.github/workflows/release.yml` then refuses to go on unless the self-test is
-green on that commit, force-moves `v2` to it, and creates the GitHub release.
-Consumers pin to the moving major tag, so a bad release breaks all of them at
-once — which is what that gate is for.
+`.github/workflows/release.yml` refuses to go on unless the self-test is green
+on that commit, then creates the GitHub release. Any `v*` tag works — the
+versioning scheme is the maintainer's, and so is the moving `v2` tag that the
+examples above pin to.
 
 ## License
 

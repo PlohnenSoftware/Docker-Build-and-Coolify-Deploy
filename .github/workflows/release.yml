@@ -1,10 +1,11 @@
-# Cut a release from a version tag and move the major tag consumers pin to.
+# Turn a version tag into a GitHub release.
 #
-#   git tag -a v2.0.0 -m v2.0.0 && git push origin v2.0.0
+#   git tag -a v2.1.0 -m v2.1.0 && git push origin v2.1.0
 #
-# -> refuses to go on if the self-test is red on that commit
-# -> force-moves v2 to it
-# -> creates the GitHub release, with generated notes
+# Any v* tag works. Versioning is the maintainer's business, and so is a moving
+# major tag if you keep one -- move it yourself, this does not touch it. Note
+# that pushing such a tag also matches the filter below; narrow it to "v*.*" if
+# you would rather bare major tags were ignored.
 #
 # The Marketplace *listing* is made once, by hand: open action.yml on GitHub,
 # "Draft a release", tick "Publish this Action to the GitHub Marketplace" and
@@ -16,14 +17,11 @@ name: Release
 
 on:
   push:
-    # Matches v2.0.0 and v2.0. The bare major tag this workflow pushes has no
-    # dot, so it cannot match -- and a push made with GITHUB_TOKEN does not
-    # start another run anyway.
-    tags: ["v*.*"]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing version tag to release, e.g. v2.0.1"
+        description: "Existing tag to release, e.g. v2.1.0"
         required: true
 
 permissions:
@@ -45,22 +43,18 @@ jobs:
           set -euo pipefail
           git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
             || { echo "::error::tag $TAG does not exist"; exit 1; }
-          # v2.0.0-rc1 is a release, but it must not drag the stable v2 tag
-          # onto itself.
+          # v2.1.0-rc1 is a release, but not the latest one.
           prerelease=false
           case "$TAG" in *-*) prerelease=true ;; esac
-
           {
             echo "tag=$TAG"
-            echo "major=${TAG%%.*}"
             echo "prerelease=$prerelease"
             echo "sha=$(git rev-parse "refs/tags/$TAG^{commit}")"
           } >> "$GITHUB_OUTPUT"
 
-      # Consumers pin to the moving major tag, so a bad release breaks all of
-      # them at once. A red self-test stops the release; a missing one only
-      # warns, so a repository without tests -- or a tag pushed before the run
-      # has finished -- is not blocked.
+      # A red self-test stops the release; a missing one only warns, so a
+      # repository without tests -- or a tag pushed before the run has finished
+      # -- is not blocked.
       - name: Require a green self-test
         env:
           GH_TOKEN: ${{ github.token }}
@@ -81,18 +75,6 @@ jobs:
             *)             echo "::error::the self-test is not green on $SHA."; exit 1 ;;
           esac
 
-      - name: Move the major tag
-        if: steps.tag.outputs.prerelease != 'true'
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
-          MAJOR: ${{ steps.tag.outputs.major }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "$MAJOR" "$TAG^{commit}"
-          git push --force origin "refs/tags/$MAJOR"
-
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,26 +84,14 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists, leaving it alone."
-          else
-            args=(--title "$TAG" --generate-notes --verify-tag)
-            if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
-            gh release create "$TAG" "${args[@]}"
+            exit 0
           fi
+          args=(--title "$TAG" --generate-notes --verify-tag)
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "${args[@]}"
 
       - name: Summary
         env:
           TAG: ${{ steps.tag.outputs.tag }}
-          MAJOR: ${{ steps.tag.outputs.major }}
-          PRERELEASE: ${{ steps.tag.outputs.prerelease }}
         run: |
-          {
-            echo "### $TAG"
-            echo
-            if [ "$PRERELEASE" = true ]; then
-              echo "Prerelease, so \`$MAJOR\` was left where it was."
-            else
-              echo "\`$MAJOR\` now points at \`$TAG\`, so \`uses: $GITHUB_REPOSITORY@$MAJOR\` resolves to it."
-            fi
-            echo
-            echo "[Release]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG)"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "[$TAG]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG)" >> "$GITHUB_STEP_SUMMARY"
