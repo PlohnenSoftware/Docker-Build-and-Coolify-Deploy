@@ -113,8 +113,8 @@ inputs:
     description: 'Coolify Deploy Webhook URL of the app to redeploy. Empty skips the trigger entirely. Safe to pass from a repository variable rather than a secret: it does nothing without the token, and an unmasked URL means a failed call shows the real address in the log instead of ***.'
     required: false
     default: ""
-  coolify_token:
-    description: 'Coolify API token, sent as a bearer token. Required for the trigger to run.'
+  coolify_deploy_api_key:
+    description: 'Coolify API key with deploy permission, sent as a bearer token. Named for what Coolify calls it -- Keys & Tokens -> API tokens -- not to be confused with anything in the webhook URL. Required for the trigger to run.'
     required: false
     default: ""
   coolify_force:
@@ -172,8 +172,8 @@ runs:
         CACHE_TO: ${{ inputs.cache_to }}
         DEPLOY: ${{ inputs.deploy }}
         WEBHOOK_SET: ${{ inputs.coolify_webhook_url != '' }}
-        # A boolean, never the token itself: this step prints what it resolved.
-        TOKEN_SET: ${{ inputs.coolify_token != '' }}
+        # A boolean, never the key itself: this step prints what it resolved.
+        KEY_SET: ${{ inputs.coolify_deploy_api_key != '' }}
       run: |
         set -euo pipefail
 
@@ -259,19 +259,19 @@ runs:
         case "$DEPLOY" in
           auto)
             deploy=false
-            if [ "$WEBHOOK_SET" = true ] && [ "$TOKEN_SET" = true ] && [ "$push" = true ]; then
+            if [ "$WEBHOOK_SET" = true ] && [ "$KEY_SET" = true ] && [ "$push" = true ]; then
               deploy=true
             fi
             # Half-configured is nearly always a mistake -- a secret that was
             # never created resolves to an empty string in silence.
-            if [ "$WEBHOOK_SET" != "$TOKEN_SET" ]; then
-              echo "::warning::Only one of coolify_webhook_url / coolify_token is set, so no redeploy will be triggered."
+            if [ "$WEBHOOK_SET" != "$KEY_SET" ]; then
+              echo "::warning::Only one of coolify_webhook_url / coolify_deploy_api_key is set, so no redeploy will be triggered."
             fi
             ;;
           true)
             deploy=true
             [ "$WEBHOOK_SET" = true ] || die "deploy is true but coolify_webhook_url is empty."
-            [ "$TOKEN_SET" = true ]   || die "deploy is true but coolify_token is empty."
+            [ "$KEY_SET" = true ]   || die "deploy is true but coolify_deploy_api_key is empty."
             ;;
           false) deploy=false ;;
           *) die "deploy must be true, false or auto (got '$DEPLOY')." ;;
@@ -349,7 +349,7 @@ runs:
       shell: bash
       env:
         WEBHOOK_URL: ${{ inputs.coolify_webhook_url }}
-        TOKEN: ${{ inputs.coolify_token }}
+        DEPLOY_API_KEY: ${{ inputs.coolify_deploy_api_key }}
         FORCE: ${{ inputs.coolify_force }}
         RETRIES: ${{ inputs.coolify_retries }}
         FAIL_ON_ERROR: "true"

@@ -6,7 +6,7 @@
 # drift; a composite action cannot `uses:` a sibling action by relative path,
 # but both can run the same script out of $GITHUB_ACTION_PATH.
 #
-# Reads   WEBHOOK_URL TOKEN FORCE RETRIES FAIL_ON_ERROR
+# Reads   WEBHOOK_URL DEPLOY_API_KEY FORCE RETRIES FAIL_ON_ERROR
 # Writes  status= and outcome= to $GITHUB_OUTPUT
 
 # No -e: every failure here is handled explicitly, and an unhandled exit would
@@ -14,7 +14,7 @@
 set -uo pipefail
 
 WEBHOOK_URL="${WEBHOOK_URL:-}"
-TOKEN="${TOKEN:-}"
+DEPLOY_API_KEY="${DEPLOY_API_KEY:-}"
 FORCE="${FORCE:-true}"
 RETRIES="${RETRIES:-2}"
 FAIL_ON_ERROR="${FAIL_ON_ERROR:-true}"
@@ -33,8 +33,8 @@ fail() {
 if [ -z "$WEBHOOK_URL" ]; then
   fail "coolify webhook URL is empty."
 fi
-if [ -z "$TOKEN" ]; then
-  fail "coolify token is empty. Create one under Keys & Tokens -> API tokens in Coolify and pass it in."
+if [ -z "$DEPLOY_API_KEY" ]; then
+  fail "the Coolify deploy API key is empty. Create one under Keys & Tokens -> API tokens in Coolify and pass it in."
 fi
 
 # Coolify only re-pulls a mutable tag -- latest, main -- when the deploy is
@@ -63,7 +63,7 @@ while : ; do
   # answers it with a wrong-method error, so there is nothing to configure.
   status="$(curl --silent --show-error \
     --request POST "$url" \
-    --header "Authorization: Bearer $TOKEN" \
+    --header "Authorization: Bearer $DEPLOY_API_KEY" \
     --output "$body" --write-out '%{http_code}' \
     --connect-timeout 10 --max-time 120)"
   rc=$?

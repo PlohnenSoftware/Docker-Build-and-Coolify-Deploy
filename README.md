@@ -37,7 +37,7 @@ jobs:
         with:
           image: your-org/your-app
           coolify_webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
-          coolify_token: ${{ secrets.COOLIFY_TOKEN }}
+          coolify_deploy_api_key: ${{ secrets.COOLIFY_TOKEN }}
 ```
 
 That is the whole thing. The registry defaults to `ghcr.io`, the credentials
@@ -113,7 +113,7 @@ jobs:
         with:
           image: your-org/your-service
           coolify_webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
-          coolify_token: ${{ secrets.COOLIFY_TOKEN }}
+          coolify_deploy_api_key: ${{ secrets.COOLIFY_TOKEN }}
 ```
 
 ### Checking out something unusual
@@ -183,7 +183,7 @@ jobs:
       - uses: PlohnenSoftware/Docker-Build-and-Coolify-Deploy/coolify-deploy@v2
         with:
           webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
-          token: ${{ secrets.COOLIFY_TOKEN }}
+          deploy_api_key: ${{ secrets.COOLIFY_TOKEN }}
 ```
 
 Triggering from inside the matrix instead would fire the webhook once per leg
@@ -297,7 +297,7 @@ Turn them back on if whatever pulls the image copes with them:
 ```yaml
         with:
           coolify_webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
-          coolify_token: ${{ secrets.COOLIFY_TOKEN }}
+          coolify_deploy_api_key: ${{ secrets.COOLIFY_TOKEN }}
 ```
 
 Leave both out and the action just builds and pushes; nothing is called.
@@ -314,15 +314,15 @@ confusing way for this to go wrong. If your URL already carries a `force`
 parameter, yours wins. `coolify_force: false` turns the behaviour off.
 
 **The URL can be a variable rather than a secret.** It does nothing without the
-token, and leaving it unmasked means a failed call shows the real address in the
-log instead of `***`. The token is a secret.
+key, and leaving it unmasked means a failed call shows the real address in the
+log instead of `***`. The key is a secret.
 
-On a GitHub Free organisation, put the token in the **repository** secrets, not
+On a GitHub Free organisation, put the key in the **repository** secrets, not
 the organisation's: org-level secrets are not available to private repos on that
 plan and resolve to an empty string in silence. The action warns when exactly
 one of the two inputs is set, which is what that failure looks like.
 
-**Failures are reported with the body.** Coolify answers a bad UUID, a token
+**Failures are reported with the body.** Coolify answers a bad UUID, a key
 scoped to another team and a missing permission all with a bare `404`, and only
 the response body says which — so the body is printed rather than discarded.
 Connection failures, `429` and `5xx` are retried (`coolify_retries`, default
@@ -355,7 +355,7 @@ Connection failures, `429` and `5xx` are retried (`coolify_retries`, default
 | `cache_from` | *(empty)* | Raw override. |
 | `cache_to` | *(empty)* | Raw override. |
 | `coolify_webhook_url` | *(empty)* | Deploy Webhook URL. Empty skips the trigger. |
-| `coolify_token` | *(empty)* | Coolify API token. |
+| `coolify_deploy_api_key` | *(empty)* | Coolify API key with deploy permission. |
 | `coolify_force` | `true` | Append `force=true` unless the URL already sets it. |
 | `coolify_retries` | `2` | Extra attempts on a connection failure, `429` or `5xx`. |
 | `deploy` | `auto` | Trigger: `true`, `false`, or when pushed and configured. |
@@ -379,7 +379,7 @@ own, for a job that redeploys after several images have been published.
 | Input | Default | Description |
 |---|---|---|
 | `webhook_url` | *(required)* | Deploy Webhook URL. |
-| `token` | *(required)* | Coolify API token. |
+| `deploy_api_key` | *(required)* | Coolify API key with deploy permission. |
 | `force` | `true` | Append `force=true` unless the URL already sets it. |
 | `retries` | `2` | Extra attempts on a connection failure, `429` or `5xx`. |
 | `fail_on_error` | `true` | Fail the step when the redeploy is not accepted. |
@@ -434,8 +434,9 @@ services:
 ### 3. The redeploy webhook
 
 In Coolify, open the resource → **Webhooks** → copy the **Deploy Webhook** URL,
-and create an API token under **Keys & Tokens → API tokens** with permission to
-deploy. Then, in the GitHub repository:
+and create an API key under **Keys & Tokens → API tokens** with permission to
+deploy. That key is what `coolify_deploy_api_key` wants; the secret you store it
+in can be called anything. Then, in the GitHub repository:
 
 - **Settings → Secrets and variables → Actions → Variables**:
   `COOLIFY_WEBHOOK_URL`

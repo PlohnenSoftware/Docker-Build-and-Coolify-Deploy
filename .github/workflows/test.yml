@@ -80,7 +80,7 @@ jobs:
         uses: ./coolify-deploy
         with:
           webhook_url: http://127.0.0.1:8099/deploy?uuid=fixture
-          token: fixture-token
+          deploy_api_key: fixture-token
 
       # The interesting half: a 4xx has to fail the step rather than pass on a
       # 200-shaped assumption, and the failure has to be reportable.
@@ -89,7 +89,7 @@ jobs:
         uses: ./coolify-deploy
         with:
           webhook_url: http://127.0.0.1:8099/unknown-uuid
-          token: fixture-token
+          deploy_api_key: fixture-token
           retries: 0
           fail_on_error: false
 
@@ -123,7 +123,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          WEBHOOK_URL=http://127.0.0.1:9/deploy TOKEN=x RETRIES=0 \
+          WEBHOOK_URL=http://127.0.0.1:9/deploy DEPLOY_API_KEY=x RETRIES=0 \
             bash scripts/coolify-deploy.sh && {
               echo "::error::an unreachable webhook was reported as a success"
               exit 1

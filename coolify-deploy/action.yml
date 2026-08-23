@@ -14,8 +14,8 @@ inputs:
   webhook_url:
     description: 'Coolify Deploy Webhook URL of the app to redeploy.'
     required: true
-  token:
-    description: 'Coolify API token, sent as a bearer token.'
+  deploy_api_key:
+    description: 'Coolify API key with deploy permission, sent as a bearer token.'
     required: true
   force:
     description: 'Append force=true to the webhook URL unless it already carries a force parameter. Without it Coolify may keep the container it already has when the tag it points at is a mutable one like latest.'
@@ -46,7 +46,7 @@ runs:
       shell: bash
       env:
         WEBHOOK_URL: ${{ inputs.webhook_url }}
-        TOKEN: ${{ inputs.token }}
+        DEPLOY_API_KEY: ${{ inputs.deploy_api_key }}
         FORCE: ${{ inputs.force }}
         RETRIES: ${{ inputs.retries }}
         FAIL_ON_ERROR: ${{ inputs.fail_on_error }}
