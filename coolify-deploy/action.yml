@@ -2,7 +2,7 @@
 # cannot cover: a repository that publishes several images, where the redeploy
 # has to run once, after all of them, instead of once per matrix leg.
 #
-#   uses: PlohnenSoftware/docker-coolify-deploy/coolify-deploy@v1
+#   uses: PlohnenSoftware/Docker-Build-and-Coolify-Deploy/coolify-deploy@v2
 name: 'Coolify Deploy'
 description: 'Call a Coolify Deploy Webhook and fail the job unless it is accepted'
 author: 'PlohnenSoftware'
@@ -17,10 +17,6 @@ inputs:
   token:
     description: 'Coolify API token, sent as a bearer token.'
     required: true
-  method:
-    description: 'HTTP method for the webhook. Coolify accepts GET; POST also works.'
-    required: false
-    default: "GET"
   force:
     description: 'Append force=true to the webhook URL unless it already carries a force parameter. Without it Coolify may keep the container it already has when the tag it points at is a mutable one like latest.'
     required: false
@@ -51,7 +47,6 @@ runs:
       env:
         WEBHOOK_URL: ${{ inputs.webhook_url }}
         TOKEN: ${{ inputs.token }}
-        METHOD: ${{ inputs.method }}
         FORCE: ${{ inputs.force }}
         RETRIES: ${{ inputs.retries }}
         FAIL_ON_ERROR: ${{ inputs.fail_on_error }}

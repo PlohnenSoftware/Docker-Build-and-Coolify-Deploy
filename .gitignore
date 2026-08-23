@@ -1,8 +1,9 @@
 __pycache__/
 *.pyc
 
-# Only the action manifests are published; ignore all other YAML files.
-*.yml
-*.yaml
+# The reference workflows this action was generalised from sit in the
+# repository root and are not published. Anchored to the root, so .github/
+# and the sub-action's manifest are unaffected.
+/*.yml
+/*.yaml
 !/action.yml
-!/coolify-deploy/action.yml

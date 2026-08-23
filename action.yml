@@ -117,10 +117,6 @@ inputs:
     description: 'Coolify API token, sent as a bearer token. Required for the trigger to run.'
     required: false
     default: ""
-  coolify_method:
-    description: 'HTTP method for the webhook. Coolify accepts GET; POST also works.'
-    required: false
-    default: "GET"
   coolify_force:
     description: 'Append force=true to the webhook URL unless it already carries a force parameter. Without it Coolify may keep the container it already has when the tag it points at is a mutable one like latest.'
     required: false
@@ -354,7 +350,6 @@ runs:
       env:
         WEBHOOK_URL: ${{ inputs.coolify_webhook_url }}
         TOKEN: ${{ inputs.coolify_token }}
-        METHOD: ${{ inputs.coolify_method }}
         FORCE: ${{ inputs.coolify_force }}
         RETRIES: ${{ inputs.coolify_retries }}
         FAIL_ON_ERROR: "true"

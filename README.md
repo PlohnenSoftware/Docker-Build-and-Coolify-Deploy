@@ -1,6 +1,6 @@
 # Docker Build and Coolify Deploy
 
-[![Test](https://github.com/PlohnenSoftware/docker-coolify-deploy/actions/workflows/test.yml/badge.svg)](https://github.com/PlohnenSoftware/docker-coolify-deploy/actions/workflows/test.yml)
+[![Test](https://github.com/PlohnenSoftware/Docker-Build-and-Coolify-Deploy/actions/workflows/test.yml/badge.svg)](https://github.com/PlohnenSoftware/Docker-Build-and-Coolify-Deploy/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Build a Docker image in GitHub Actions, push it to a registry, and tell
@@ -33,7 +33,7 @@ jobs:
       packages: write # required: this is what lets the push to GHCR succeed
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: PlohnenSoftware/docker-coolify-deploy@v1
+      - uses: PlohnenSoftware/Docker-Build-and-Coolify-Deploy@v2
         with:
           image: your-org/your-app
           coolify_webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
@@ -109,7 +109,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: PlohnenSoftware/docker-coolify-deploy@v1
+      - uses: PlohnenSoftware/Docker-Build-and-Coolify-Deploy@v2
         with:
           image: your-org/your-service
           coolify_webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
@@ -168,7 +168,7 @@ jobs:
             file: ./Dockerfile.frontend
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: PlohnenSoftware/docker-coolify-deploy@v1
+      - uses: PlohnenSoftware/Docker-Build-and-Coolify-Deploy@v2
         with:
           image: ${{ matrix.image }}
           context: ${{ matrix.context }}
@@ -180,7 +180,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: PlohnenSoftware/docker-coolify-deploy/coolify-deploy@v1
+      - uses: PlohnenSoftware/Docker-Build-and-Coolify-Deploy/coolify-deploy@v2
         with:
           webhook_url: ${{ vars.COOLIFY_WEBHOOK_URL }}
           token: ${{ secrets.COOLIFY_TOKEN }}
@@ -302,6 +302,10 @@ Turn them back on if whatever pulls the image copes with them:
 
 Leave both out and the action just builds and pushes; nothing is called.
 
+**Every call is a POST.** Coolify's deploy webhook used to accept `GET` as
+well and now answers it with a wrong-method error, so there is nothing to
+choose and no input for it.
+
 **`force=true` is appended for you.** Coolify compares the tag it is configured
 with against what is running, and a mutable tag like `latest` or `main` has not
 changed name even though the digest behind it has. Without the force flag the
@@ -352,7 +356,6 @@ Connection failures, `429` and `5xx` are retried (`coolify_retries`, default
 | `cache_to` | *(empty)* | Raw override. |
 | `coolify_webhook_url` | *(empty)* | Deploy Webhook URL. Empty skips the trigger. |
 | `coolify_token` | *(empty)* | Coolify API token. |
-| `coolify_method` | `GET` | HTTP method for the webhook. |
 | `coolify_force` | `true` | Append `force=true` unless the URL already sets it. |
 | `coolify_retries` | `2` | Extra attempts on a connection failure, `429` or `5xx`. |
 | `deploy` | `auto` | Trigger: `true`, `false`, or when pushed and configured. |
@@ -370,14 +373,13 @@ Connection failures, `429` and `5xx` are retried (`coolify_retries`, default
 
 ### `coolify-deploy` reference
 
-`PlohnenSoftware/docker-coolify-deploy/coolify-deploy@v1` — the webhook on its
+`PlohnenSoftware/Docker-Build-and-Coolify-Deploy/coolify-deploy@v2` — the webhook on its
 own, for a job that redeploys after several images have been published.
 
 | Input | Default | Description |
 |---|---|---|
 | `webhook_url` | *(required)* | Deploy Webhook URL. |
 | `token` | *(required)* | Coolify API token. |
-| `method` | `GET` | HTTP method. |
 | `force` | `true` | Append `force=true` unless the URL already sets it. |
 | `retries` | `2` | Extra attempts on a connection failure, `429` or `5xx`. |
 | `fail_on_error` | `true` | Fail the step when the redeploy is not accepted. |
@@ -442,7 +444,7 @@ deploy. Then, in the GitHub repository:
 Check it by hand before wiring it up:
 
 ```console
-$ curl -i -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK_URL&force=true"
+$ curl -i -X POST -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK_URL&force=true"
 ```
 
 ## Requirements
@@ -456,8 +458,18 @@ $ curl -i -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK_URL&force=
 
 `.github/workflows/test.yml` runs the action against `test/fixture` and the
 webhook against a local stub, so the whole path is covered without a registry or
-a Coolify instance. Run it green before moving the `v1` tag — consumers pin to a
-moving major tag, so a bad push breaks all of them at once.
+a Coolify instance.
+
+Releasing is a tag push:
+
+```console
+$ git tag -a v2.0.1 -m v2.0.1 && git push origin v2.0.1
+```
+
+`.github/workflows/release.yml` then refuses to go on unless the self-test is
+green on that commit, force-moves `v2` to it, and creates the GitHub release.
+Consumers pin to the moving major tag, so a bad release breaks all of them at
+once — which is what that gate is for.
 
 ## License
 

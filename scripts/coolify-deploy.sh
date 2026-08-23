@@ -6,7 +6,7 @@
 # drift; a composite action cannot `uses:` a sibling action by relative path,
 # but both can run the same script out of $GITHUB_ACTION_PATH.
 #
-# Reads   WEBHOOK_URL TOKEN METHOD FORCE RETRIES FAIL_ON_ERROR
+# Reads   WEBHOOK_URL TOKEN FORCE RETRIES FAIL_ON_ERROR
 # Writes  status= and outcome= to $GITHUB_OUTPUT
 
 # No -e: every failure here is handled explicitly, and an unhandled exit would
@@ -15,7 +15,6 @@ set -uo pipefail
 
 WEBHOOK_URL="${WEBHOOK_URL:-}"
 TOKEN="${TOKEN:-}"
-METHOD="${METHOD:-GET}"
 FORCE="${FORCE:-true}"
 RETRIES="${RETRIES:-2}"
 FAIL_ON_ERROR="${FAIL_ON_ERROR:-true}"
@@ -60,8 +59,10 @@ while : ; do
   # Deliberately not --fail, which throws the response body away. Coolify puts
   # the actual cause in there -- an unknown UUID, a token scoped to another
   # team and a missing permission all surface as the same bare 404.
+  # POST, always. Coolify's deploy webhook used to accept GET too and now
+  # answers it with a wrong-method error, so there is nothing to configure.
   status="$(curl --silent --show-error \
-    --request "$METHOD" "$url" \
+    --request POST "$url" \
     --header "Authorization: Bearer $TOKEN" \
     --output "$body" --write-out '%{http_code}' \
     --connect-timeout 10 --max-time 120)"

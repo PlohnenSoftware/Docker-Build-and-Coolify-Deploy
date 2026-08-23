@@ -110,6 +110,8 @@ jobs:
           [ "$BAD_OUTCOME" = failed ] || fail "expected failed, got '$BAD_OUTCOME'"
 
           cat "$RUNNER_TEMP/stub.log"
+          grep -q '^POST /deploy' "$RUNNER_TEMP/stub.log" \
+            || fail "the webhook was not called with POST"
           grep -q 'force=true' "$RUNNER_TEMP/stub.log" \
             || fail "force=true was not appended to the webhook URL"
           grep -q 'auth=Bearer fixture-token' "$RUNNER_TEMP/stub.log" \
