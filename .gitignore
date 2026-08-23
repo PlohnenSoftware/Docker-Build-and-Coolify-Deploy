@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# Only the action manifests are published; ignore all other YAML files.
+*.yml
+*.yaml
+!/action.yml
+!/coolify-deploy/action.yml

@@ -192,21 +192,20 @@ runs:
         [ -n "$image" ] || die "the 'image' input is required."
         registry="$(lower "$REGISTRY")"
         registry="${registry%/}"
-        case "$image" in
-          "$registry"/*) ref="$image" ;;                    # already qualified
-          *)             ref="${registry:+$registry/}$image" ;;
+
+        # An image that already carries a host wins over the registry input,
+        # so `image: ghcr.io/org/app` and `image: org/app` both do what they
+        # look like they do -- including for the login below.
+        case "${image%%/*}" in
+          *.*|*:*|localhost) registry="${image%%/*}"; repository="${image#*/}" ;;
+          *)                 repository="$image" ;;
         esac
+        ref="${registry:+$registry/}$repository"
 
         case "$PUSH" in
           auto)  if [ "$GITHUB_EVENT_NAME" = pull_request ]; then push=false; else push=true; fi ;;
           true|false) push="$PUSH" ;;
           *) die "push must be true, false or auto (got '$PUSH')." ;;
-        esac
-
-        case "$LOGIN" in
-          auto)  login="$push" ;;
-          true|false) login="$LOGIN" ;;
-          *) die "login must be true, false or auto (got '$LOGIN')." ;;
         esac
 
         # QEMU costs ~10s to install, so only pay for it when the build really
@@ -226,7 +225,7 @@ runs:
         esac
 
         scope="$CACHE_SCOPE"
-        if [ -z "$scope" ]; then scope="${image##*/}"; fi
+        if [ -z "$scope" ]; then scope="${repository##*/}"; fi
         case "$CACHE" in
           gha)
             cache_from="type=gha,scope=$scope"
@@ -249,6 +248,17 @@ runs:
         esac
         if [ -n "$CACHE_FROM" ]; then cache_from="$CACHE_FROM"; fi
         if [ -n "$CACHE_TO" ];   then cache_to="$CACHE_TO"; fi
+
+        # After the cache, because a registry cache has to be readable even on
+        # a pull request that never pushes anything.
+        case "$LOGIN" in
+          auto)
+            login="$push"
+            case "$cache_from" in type=registry,*) login=true ;; esac
+            ;;
+          true|false) login="$LOGIN" ;;
+          *) die "login must be true, false or auto (got '$LOGIN')." ;;
+        esac
 
         case "$DEPLOY" in
           auto)
@@ -273,6 +283,7 @@ runs:
 
         {
           echo "image=$ref"
+          echo "registry=$registry"
           echo "push=$push"
           echo "login=$login"
           echo "qemu=$qemu"
@@ -298,7 +309,7 @@ runs:
       if: steps.prep.outputs.login == 'true'
       uses: docker/login-action@v4.6.0
       with:
-        registry: ${{ inputs.registry }}
+        registry: ${{ steps.prep.outputs.registry }}
         username: ${{ inputs.username }}
         password: ${{ inputs.password }}
 
