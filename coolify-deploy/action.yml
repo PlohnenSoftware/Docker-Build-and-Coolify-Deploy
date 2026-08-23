@@ -1,0 +1,61 @@
+# Sub-action of Docker Build and Coolify Deploy, for the case the root action
+# cannot cover: a repository that publishes several images, where the redeploy
+# has to run once, after all of them, instead of once per matrix leg.
+#
+#   uses: PlohnenSoftware/docker-coolify-deploy/coolify-deploy@v1
+name: 'Coolify Deploy'
+description: 'Call a Coolify Deploy Webhook and fail the job unless it is accepted'
+author: 'PlohnenSoftware'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
+inputs:
+  webhook_url:
+    description: 'Coolify Deploy Webhook URL of the app to redeploy.'
+    required: true
+  token:
+    description: 'Coolify API token, sent as a bearer token.'
+    required: true
+  method:
+    description: 'HTTP method for the webhook. Coolify accepts GET; POST also works.'
+    required: false
+    default: "GET"
+  force:
+    description: 'Append force=true to the webhook URL unless it already carries a force parameter. Without it Coolify may keep the container it already has when the tag it points at is a mutable one like latest.'
+    required: false
+    default: "true"
+  retries:
+    description: 'Extra attempts on a connection failure, 429 or 5xx. A 4xx is a real answer and is never retried.'
+    required: false
+    default: "2"
+  fail_on_error:
+    description: 'Fail the step when Coolify does not accept the redeploy. Set false to report the outcome and carry on.'
+    required: false
+    default: "true"
+
+outputs:
+  status:
+    description: 'HTTP status code of the last attempt, or 000 if Coolify was never reached.'
+    value: ${{ steps.deploy.outputs.status }}
+  outcome:
+    description: 'success or failed.'
+    value: ${{ steps.deploy.outputs.outcome }}
+
+runs:
+  using: composite
+  steps:
+    - name: Trigger Coolify deployment
+      id: deploy
+      shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.webhook_url }}
+        TOKEN: ${{ inputs.token }}
+        METHOD: ${{ inputs.method }}
+        FORCE: ${{ inputs.force }}
+        RETRIES: ${{ inputs.retries }}
+        FAIL_ON_ERROR: ${{ inputs.fail_on_error }}
+      # GITHUB_ACTION_PATH is this directory, so the shared script sits one
+      # level up. Keeping one copy is what stops the two entry points from
+      # disagreeing about force=true or about which statuses are retried.
+      run: bash "$GITHUB_ACTION_PATH/../scripts/coolify-deploy.sh"

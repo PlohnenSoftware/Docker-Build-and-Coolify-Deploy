@@ -1,0 +1,129 @@
+# Self-test. Runs the action against test/fixture and the webhook against a
+# local stub, so every step is exercised without a registry or a Coolify
+# instance being involved.
+#
+# Run this green before moving the v1 tag. Consumers are pinned to a moving
+# major tag, so a bad push breaks all of them at once.
+
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build without pushing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: docker
+        uses: ./
+        with:
+          # Mixed case on purpose: GHCR would reject this verbatim, and the
+          # action is supposed to lowercase it.
+          image: PlohnenSoftware/Fixture
+          context: test/fixture
+          target: final
+          push: false
+          # The GitHub cache service is fine here, but a cache write on a fork
+          # PR warns; nothing to reuse in a two-line Dockerfile anyway.
+          cache: none
+          build_args: |
+            GREETING=built-by-the-self-test
+
+      - name: Check the outputs
+        shell: bash
+        env:
+          IMAGE: ${{ steps.docker.outputs.image }}
+          VERSION: ${{ steps.docker.outputs.version }}
+          TAGS: ${{ steps.docker.outputs.tags }}
+          PUSHED: ${{ steps.docker.outputs.pushed }}
+          DEPLOY_STATUS: ${{ steps.docker.outputs.deploy_status }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          [ "$IMAGE" = "ghcr.io/plohnensoftware/fixture" ] \
+            || fail "image was not lowercased: got '$IMAGE'"
+          [ -n "$VERSION" ] || fail "no version output"
+          [ -n "$TAGS" ] || fail "no tags output"
+          [ "$PUSHED" = false ] || fail "push: false was not honoured"
+          [ "$DEPLOY_STATUS" = skipped ] \
+            || fail "no Coolify inputs were given, so deploy_status should be skipped, got '$DEPLOY_STATUS'"
+
+  deploy:
+    name: Webhook against a local stub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Start the stub
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/stub.log"
+          python3 test/coolify-stub.py 127.0.0.1 8099 "$RUNNER_TEMP/stub.log" &
+          for _ in $(seq 50); do
+            if curl -sf http://127.0.0.1:8099/health >/dev/null; then exit 0; fi
+            sleep 0.2
+          done
+          echo "::error::the stub never came up"; exit 1
+
+      - name: Accepted webhook
+        id: ok
+        uses: ./coolify-deploy
+        with:
+          webhook_url: http://127.0.0.1:8099/deploy?uuid=fixture
+          token: fixture-token
+
+      # The interesting half: a 4xx has to fail the step rather than pass on a
+      # 200-shaped assumption, and the failure has to be reportable.
+      - name: Rejected webhook
+        id: bad
+        uses: ./coolify-deploy
+        with:
+          webhook_url: http://127.0.0.1:8099/unknown-uuid
+          token: fixture-token
+          retries: 0
+          fail_on_error: false
+
+      - name: Check what the stub was sent
+        shell: bash
+        env:
+          OK_STATUS: ${{ steps.ok.outputs.status }}
+          OK_OUTCOME: ${{ steps.ok.outputs.outcome }}
+          BAD_STATUS: ${{ steps.bad.outputs.status }}
+          BAD_OUTCOME: ${{ steps.bad.outputs.outcome }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          [ "$OK_STATUS" = 200 ] || fail "expected 200, got '$OK_STATUS'"
+          [ "$OK_OUTCOME" = success ] || fail "expected success, got '$OK_OUTCOME'"
+          [ "$BAD_STATUS" = 404 ] || fail "expected 404, got '$BAD_STATUS'"
+          [ "$BAD_OUTCOME" = failed ] || fail "expected failed, got '$BAD_OUTCOME'"
+
+          cat "$RUNNER_TEMP/stub.log"
+          grep -q 'force=true' "$RUNNER_TEMP/stub.log" \
+            || fail "force=true was not appended to the webhook URL"
+          grep -q 'auth=Bearer fixture-token' "$RUNNER_TEMP/stub.log" \
+            || fail "the token was not sent as a bearer token"
+
+      # A host that is not listening must not be mistaken for success: curl
+      # reports http_code 000 there, which sails through a naive >= 400 test.
+      - name: Unreachable host fails
+        shell: bash
+        run: |
+          set -uo pipefail
+          WEBHOOK_URL=http://127.0.0.1:9/deploy TOKEN=x RETRIES=0 \
+            bash scripts/coolify-deploy.sh && {
+              echo "::error::an unreachable webhook was reported as a success"
+              exit 1
+            }
+          echo "correctly failed"

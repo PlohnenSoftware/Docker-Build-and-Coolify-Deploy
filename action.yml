@@ -1,0 +1,381 @@
+# Keep this action name stable so Marketplace releases continue to publish to
+# https://github.com/marketplace/actions/docker-build-and-coolify-deploy.
+name: 'Docker Build and Coolify Deploy'
+description: 'Build a Docker image, push it to GHCR or any registry, and trigger a Coolify redeploy of the app that runs it'
+author: 'PlohnenSoftware'
+branding:
+  icon: 'anchor'
+  color: 'blue'
+
+inputs:
+  # ---- Image and registry
+  image:
+    description: 'Image repository without the registry, for example my-org/my-app. Lowercased for you, because GHCR rejects the mixed-case name a GitHub org usually has.'
+    required: true
+  registry:
+    description: 'Registry host. Empty means Docker Hub.'
+    required: false
+    default: "ghcr.io"
+  username:
+    description: 'Registry username.'
+    required: false
+    default: ${{ github.actor }}
+  password:
+    description: 'Registry password or token. The default works for GHCR as long as the calling job has packages: write.'
+    required: false
+    default: ${{ github.token }}
+  login:
+    description: 'Log in to the registry: true, false, or auto to log in only when the image is being pushed.'
+    required: false
+    default: "auto"
+
+  # ---- Build
+  context:
+    description: 'Build context path.'
+    required: false
+    default: "."
+  file:
+    description: 'Path to the Dockerfile. Empty means <context>/Dockerfile.'
+    required: false
+    default: ""
+  target:
+    description: 'Dockerfile stage to build. Empty builds the last stage.'
+    required: false
+    default: ""
+  build_args:
+    description: 'Build arguments, one KEY=value per line. Anything inlined at build time -- NEXT_PUBLIC_*, VITE_* -- has to come in here; a runtime environment variable set in Coolify is too late.'
+    required: false
+    default: ""
+  build_secrets:
+    description: 'Build secrets, one KEY=value per line, read in the Dockerfile with --mount=type=secret. Unlike build_args these are not baked into the image.'
+    required: false
+    default: ""
+  platforms:
+    description: 'Target platforms, for example linux/amd64,linux/arm64. Empty builds for the runner architecture only.'
+    required: false
+    default: ""
+  qemu:
+    description: 'Install QEMU for cross-architecture builds: true, false, or auto to install it only when platforms names something the runner is not.'
+    required: false
+    default: "auto"
+  push:
+    description: 'Push the image: true, false, or auto to push on every event except pull_request. Under auto a PR builds as a check and can never overwrite a tag the server may pull.'
+    required: false
+    default: "auto"
+  provenance:
+    description: 'Attach a provenance attestation. Off by default: attestations add extra manifests to the index and Coolify trips over them on pull.'
+    required: false
+    default: "false"
+  sbom:
+    description: 'Attach an SBOM attestation. Off by default, for the same reason as provenance.'
+    required: false
+    default: "false"
+
+  # ---- Tags and labels
+  tags:
+    description: 'Tag rules for docker/metadata-action, one per line. The default gives you the branch name, the PR number, a semver tag, the full commit sha, and latest on the default branch.'
+    required: false
+    default: |
+      type=ref,event=branch
+      type=ref,event=pr
+      type=semver,pattern={{version}}
+      type=sha,format=long
+      type=raw,value=latest,enable={{is_default_branch}}
+  flavor:
+    description: 'Flavor rules for docker/metadata-action, one per line, for example suffix=-alpine.'
+    required: false
+    default: ""
+  labels:
+    description: 'Extra image labels, one per line, on top of the OCI labels that are generated for you.'
+    required: false
+    default: ""
+
+  # ---- Cache
+  cache:
+    description: 'Layer cache backend: gha, registry, or none. registry stores the cache as <image>:buildcache and is the one to use on self-hosted runners, where the GitHub cache service is not reachable.'
+    required: false
+    default: "gha"
+  cache_scope:
+    description: 'Cache key namespace. Defaults to the last path segment of image, which is what keeps two matrix legs from overwriting each other so that neither ever gets a hit.'
+    required: false
+    default: ""
+  cache_from:
+    description: 'Raw cache-from value, overriding whatever cache would have produced.'
+    required: false
+    default: ""
+  cache_to:
+    description: 'Raw cache-to value, overriding whatever cache would have produced.'
+    required: false
+    default: ""
+
+  # ---- Coolify
+  coolify_webhook_url:
+    description: 'Coolify Deploy Webhook URL of the app to redeploy. Empty skips the trigger entirely. Safe to pass from a repository variable rather than a secret: it does nothing without the token, and an unmasked URL means a failed call shows the real address in the log instead of ***.'
+    required: false
+    default: ""
+  coolify_token:
+    description: 'Coolify API token, sent as a bearer token. Required for the trigger to run.'
+    required: false
+    default: ""
+  coolify_method:
+    description: 'HTTP method for the webhook. Coolify accepts GET; POST also works.'
+    required: false
+    default: "GET"
+  coolify_force:
+    description: 'Append force=true to the webhook URL unless it already carries a force parameter. Without it Coolify may keep the container it already has when the tag it points at is a mutable one like latest.'
+    required: false
+    default: "true"
+  coolify_retries:
+    description: 'Extra attempts on a connection failure, 429 or 5xx. A 4xx is a real answer and is never retried.'
+    required: false
+    default: "2"
+  deploy:
+    description: 'Trigger the redeploy: true, false, or auto to trigger it whenever the image was pushed and both Coolify inputs are set.'
+    required: false
+    default: "auto"
+
+outputs:
+  image:
+    description: 'Fully qualified image name, lowercased, without a tag.'
+    value: ${{ steps.prep.outputs.image }}
+  tags:
+    description: 'Newline-separated list of tags that were built.'
+    value: ${{ steps.meta.outputs.tags }}
+  version:
+    description: 'Primary version docker/metadata-action derived for this build.'
+    value: ${{ steps.meta.outputs.version }}
+  digest:
+    description: 'Digest of the built image.'
+    value: ${{ steps.build.outputs.digest }}
+  pushed:
+    description: 'true if the image was pushed.'
+    value: ${{ steps.prep.outputs.push }}
+  deploy_status:
+    description: 'success, failed, or skipped.'
+    value: ${{ steps.deploy.outputs.outcome || 'skipped' }}
+
+runs:
+  using: composite
+  steps:
+    # Everything conditional is decided here, once, in shell -- rather than as
+    # five separate `if:` expressions that would each have to re-derive "are we
+    # on a pull request" and stay in agreement about it.
+    - name: Resolve build settings
+      id: prep
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        REGISTRY: ${{ inputs.registry }}
+        LOGIN: ${{ inputs.login }}
+        PUSH: ${{ inputs.push }}
+        PLATFORMS: ${{ inputs.platforms }}
+        QEMU: ${{ inputs.qemu }}
+        CACHE: ${{ inputs.cache }}
+        CACHE_SCOPE: ${{ inputs.cache_scope }}
+        CACHE_FROM: ${{ inputs.cache_from }}
+        CACHE_TO: ${{ inputs.cache_to }}
+        DEPLOY: ${{ inputs.deploy }}
+        WEBHOOK_SET: ${{ inputs.coolify_webhook_url != '' }}
+        # A boolean, never the token itself: this step prints what it resolved.
+        TOKEN_SET: ${{ inputs.coolify_token != '' }}
+      run: |
+        set -euo pipefail
+
+        die() { echo "::error::$*"; exit 1; }
+
+        lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+        # Registries reject uppercase. A GitHub org name is very often mixed
+        # case, so this is the difference between the action working and a
+        # confusing "invalid reference format" from the push.
+        image="$(lower "$IMAGE")"
+        [ -n "$image" ] || die "the 'image' input is required."
+        registry="$(lower "$REGISTRY")"
+        registry="${registry%/}"
+        case "$image" in
+          "$registry"/*) ref="$image" ;;                    # already qualified
+          *)             ref="${registry:+$registry/}$image" ;;
+        esac
+
+        case "$PUSH" in
+          auto)  if [ "$GITHUB_EVENT_NAME" = pull_request ]; then push=false; else push=true; fi ;;
+          true|false) push="$PUSH" ;;
+          *) die "push must be true, false or auto (got '$PUSH')." ;;
+        esac
+
+        case "$LOGIN" in
+          auto)  login="$push" ;;
+          true|false) login="$LOGIN" ;;
+          *) die "login must be true, false or auto (got '$LOGIN')." ;;
+        esac
+
+        # QEMU costs ~10s to install, so only pay for it when the build really
+        # is crossing architectures.
+        native=linux/amd64
+        if [ "${RUNNER_ARCH:-X64}" = ARM64 ]; then native=linux/arm64; fi
+        case "$QEMU" in
+          auto)
+            qemu=false
+            IFS=', ' read -r -a requested <<< "$PLATFORMS"
+            for platform in "${requested[@]:-}"; do
+              if [ -n "$platform" ] && [ "$platform" != "$native" ]; then qemu=true; fi
+            done
+            ;;
+          true|false) qemu="$QEMU" ;;
+          *) die "qemu must be true, false or auto (got '$QEMU')." ;;
+        esac
+
+        scope="$CACHE_SCOPE"
+        if [ -z "$scope" ]; then scope="${image##*/}"; fi
+        case "$CACHE" in
+          gha)
+            cache_from="type=gha,scope=$scope"
+            cache_to="type=gha,mode=max,scope=$scope"
+            ;;
+          registry)
+            cache_from="type=registry,ref=$ref:buildcache"
+            # Writing a registry cache is a push. Nothing to write to on a PR
+            # that is only building, and attempting it fails the build.
+            cache_to=""
+            if [ "$push" = true ]; then
+              cache_to="type=registry,ref=$ref:buildcache,mode=max"
+            fi
+            ;;
+          none)
+            cache_from=""
+            cache_to=""
+            ;;
+          *) die "cache must be gha, registry or none (got '$CACHE')." ;;
+        esac
+        if [ -n "$CACHE_FROM" ]; then cache_from="$CACHE_FROM"; fi
+        if [ -n "$CACHE_TO" ];   then cache_to="$CACHE_TO"; fi
+
+        case "$DEPLOY" in
+          auto)
+            deploy=false
+            if [ "$WEBHOOK_SET" = true ] && [ "$TOKEN_SET" = true ] && [ "$push" = true ]; then
+              deploy=true
+            fi
+            # Half-configured is nearly always a mistake -- a secret that was
+            # never created resolves to an empty string in silence.
+            if [ "$WEBHOOK_SET" != "$TOKEN_SET" ]; then
+              echo "::warning::Only one of coolify_webhook_url / coolify_token is set, so no redeploy will be triggered."
+            fi
+            ;;
+          true)
+            deploy=true
+            [ "$WEBHOOK_SET" = true ] || die "deploy is true but coolify_webhook_url is empty."
+            [ "$TOKEN_SET" = true ]   || die "deploy is true but coolify_token is empty."
+            ;;
+          false) deploy=false ;;
+          *) die "deploy must be true, false or auto (got '$DEPLOY')." ;;
+        esac
+
+        {
+          echo "image=$ref"
+          echo "push=$push"
+          echo "login=$login"
+          echo "qemu=$qemu"
+          echo "deploy=$deploy"
+          echo "cache_from=$cache_from"
+          echo "cache_to=$cache_to"
+        } >> "$GITHUB_OUTPUT"
+
+        printf 'image      %s\n' "$ref"
+        printf 'push       %s\n' "$push"
+        printf 'platforms  %s\n' "${PLATFORMS:-(runner default)}"
+        printf 'cache      %s\n' "${cache_from:-(disabled)}"
+        printf 'redeploy   %s\n' "$deploy"
+
+    - name: Set up QEMU
+      if: steps.prep.outputs.qemu == 'true'
+      uses: docker/setup-qemu-action@v4.2.0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+
+    - name: Log in to the container registry
+      if: steps.prep.outputs.login == 'true'
+      uses: docker/login-action@v4.6.0
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Extract metadata (tags, labels)
+      id: meta
+      uses: docker/metadata-action@v6.2.0
+      with:
+        images: ${{ steps.prep.outputs.image }}
+        tags: ${{ inputs.tags }}
+        flavor: ${{ inputs.flavor }}
+        labels: ${{ inputs.labels }}
+
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@v7.3.0
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.file }}
+        target: ${{ inputs.target }}
+        platforms: ${{ inputs.platforms }}
+        push: ${{ steps.prep.outputs.push }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        annotations: ${{ steps.meta.outputs.annotations }}
+        build-args: ${{ inputs.build_args }}
+        secrets: ${{ inputs.build_secrets }}
+        provenance: ${{ inputs.provenance }}
+        sbom: ${{ inputs.sbom }}
+        cache-from: ${{ steps.prep.outputs.cache_from }}
+        cache-to: ${{ steps.prep.outputs.cache_to }}
+
+    # Tell Coolify to pull and redeploy as soon as the new image exists.
+    #
+    # Fine as a step for a single image. If the repository publishes a matrix of
+    # them, set deploy: false here and put the coolify-deploy sub-action in its
+    # own job with `needs:` -- as a step it fires once per leg and starts
+    # concurrent deploys of a half-published image set.
+    - name: Trigger Coolify deployment
+      id: deploy
+      if: steps.prep.outputs.deploy == 'true'
+      shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.coolify_webhook_url }}
+        TOKEN: ${{ inputs.coolify_token }}
+        METHOD: ${{ inputs.coolify_method }}
+        FORCE: ${{ inputs.coolify_force }}
+        RETRIES: ${{ inputs.coolify_retries }}
+        FAIL_ON_ERROR: "true"
+      run: bash "$GITHUB_ACTION_PATH/scripts/coolify-deploy.sh"
+
+    - name: Summary
+      if: always()
+      shell: bash
+      env:
+        IMAGE: ${{ steps.prep.outputs.image }}
+        TAGS: ${{ steps.meta.outputs.tags }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+        PUSHED: ${{ steps.prep.outputs.push }}
+        DEPLOY: ${{ steps.prep.outputs.deploy }}
+        DEPLOY_OUTCOME: ${{ steps.deploy.outputs.outcome }}
+      run: |
+        set -uo pipefail
+        {
+          echo "### ${IMAGE:-image unknown}"
+          echo
+          echo "| | |"
+          echo "|---|---|"
+          echo "| Pushed | ${PUSHED:-no} |"
+          echo "| Digest | \`${DIGEST:-—}\` |"
+          if [ "${DEPLOY:-false}" = true ]; then
+            echo "| Coolify | ${DEPLOY_OUTCOME:-did not run} |"
+          else
+            echo "| Coolify | not configured |"
+          fi
+          echo
+          echo '```'
+          printf '%s\n' "${TAGS:-(nothing built)}"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
