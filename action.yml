@@ -296,10 +296,10 @@ runs:
 
     - name: Set up QEMU
       if: steps.prep.outputs.qemu == 'true'
-      uses: docker/setup-qemu-action@v4.2.0
+      uses: docker/setup-qemu-action@v4.4.0
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     - name: Log in to the container registry
       if: steps.prep.outputs.login == 'true'
@@ -320,7 +320,7 @@ runs:
 
     - name: Build and push
       id: build
-      uses: docker/build-push-action@v7.3.0
+      uses: docker/build-push-action@v7.4.0
       with:
         context: ${{ inputs.context }}
         file: ${{ inputs.file }}
