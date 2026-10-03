@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # "/" covers the workflows and the composite action.yml at the root;
+  # coolify-deploy/ is the second composite action.
+  - package-ecosystem: "github-actions"
+    directories: ["/", "/coolify-deploy"]
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
